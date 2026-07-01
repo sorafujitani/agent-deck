@@ -152,6 +152,69 @@ func TestAppLatestAndJSON(t *testing.T) {
 	}
 }
 
+func TestAppRepoScopedLatest(t *testing.T) {
+	store := storage.NewJSONStore(filepath.Join(t.TempDir(), "deck.json"))
+	service := deck.NewService(
+		store,
+		deck.WithClock(func() time.Time {
+			return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+		}),
+		deck.WithIDGenerator(sequenceIDGenerator("tsk_1", "tsk_2")),
+	)
+	app := NewApp(service, store.Path())
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.Run([]string{"new", "first", "--repo", "/tmp/first"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("new first exit = %d, stderr = %s", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = app.Run([]string{"new", "second", "--repo", "/tmp/second"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("new second exit = %d, stderr = %s", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = app.Run(
+		[]string{"update", "tsk_1", "--status", string(deck.StatusNeedsReview)},
+		&stdout,
+		&stderr,
+	)
+	if code != 0 {
+		t.Fatalf("update exit = %d, stderr = %s", code, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = app.Run([]string{"show", "--repo", "/tmp/second", "--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("show exit = %d, stderr = %s", code, stderr.String())
+	}
+	var shown deck.Task
+	if err := json.Unmarshal(stdout.Bytes(), &shown); err != nil {
+		t.Fatal(err)
+	}
+	if shown.ID != "tsk_2" {
+		t.Fatalf("shown id = %s, want tsk_2", shown.ID)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = app.Run([]string{"inbox", "--repo", "/tmp/second", "--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("inbox exit = %d, stderr = %s", code, stderr.String())
+	}
+	var tasks []deck.Task
+	if err := json.Unmarshal(stdout.Bytes(), &tasks); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "tsk_2" {
+		t.Fatalf("tasks = %#v, want only tsk_2", tasks)
+	}
+}
+
 func sequenceIDGenerator(ids ...string) deck.IDGenerator {
 	index := 0
 	return func(prefix string) string {

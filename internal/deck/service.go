@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,11 @@ type Repository interface {
 type Clock func() time.Time
 
 type IDGenerator func(prefix string) string
+
+type TaskQuery struct {
+	IncludeDone bool
+	Repo        string
+}
 
 type Service struct {
 	repo  Repository
@@ -62,12 +68,12 @@ func RandomID(prefix string) string {
 	return prefix + "_" + hex.EncodeToString(bytes[:])
 }
 
-func (s *Service) Inbox(includeDone bool) ([]Task, error) {
+func (s *Service) Inbox(query TaskQuery) ([]Task, error) {
 	state, err := s.repo.Load()
 	if err != nil {
 		return []Task{}, fmt.Errorf("load deck: %w", err)
 	}
-	return SortByAttention(state.Tasks, includeDone), nil
+	return SortByAttention(filterTasks(state.Tasks, query), query.IncludeDone), nil
 }
 
 func (s *Service) CreateTask(input NewTaskInput) (Task, error) {
@@ -86,8 +92,8 @@ func (s *Service) CreateTask(input NewTaskInput) (Task, error) {
 	return task, nil
 }
 
-func (s *Service) GetTask(id string) (Task, error) {
-	id, err := s.ResolveTaskID(id)
+func (s *Service) GetTask(id string, query TaskQuery) (Task, error) {
+	id, err := s.ResolveTaskID(id, query)
 	if err != nil {
 		return Task{}, err
 	}
@@ -103,8 +109,8 @@ func (s *Service) GetTask(id string) (Task, error) {
 	return task, nil
 }
 
-func (s *Service) UpdateTask(id string, input UpdateTaskInput) (Task, error) {
-	id, err := s.ResolveTaskID(id)
+func (s *Service) UpdateTask(id string, input UpdateTaskInput, query TaskQuery) (Task, error) {
+	id, err := s.ResolveTaskID(id, query)
 	if err != nil {
 		return Task{}, err
 	}
@@ -124,15 +130,15 @@ func (s *Service) UpdateTask(id string, input UpdateTaskInput) (Task, error) {
 	return task, nil
 }
 
-func (s *Service) MarkDone(id string, nextAction *string) (Task, error) {
+func (s *Service) MarkDone(id string, nextAction *string, query TaskQuery) (Task, error) {
 	return s.UpdateTask(id, UpdateTaskInput{
 		Status:     string(StatusDone),
 		NextAction: nextAction,
-	})
+	}, query)
 }
 
-func (s *Service) AddRun(id string, input AddRunInput) (Task, RunRecord, error) {
-	id, err := s.ResolveTaskID(id)
+func (s *Service) AddRun(id string, input AddRunInput, query TaskQuery) (Task, RunRecord, error) {
+	id, err := s.ResolveTaskID(id, query)
 	if err != nil {
 		return Task{}, RunRecord{}, err
 	}
@@ -152,8 +158,8 @@ func (s *Service) AddRun(id string, input AddRunInput) (Task, RunRecord, error) 
 	return task, run, nil
 }
 
-func (s *Service) AddArtifact(id string, input AddArtifactInput) (Task, Artifact, error) {
-	id, err := s.ResolveTaskID(id)
+func (s *Service) AddArtifact(id string, input AddArtifactInput, query TaskQuery) (Task, Artifact, error) {
+	id, err := s.ResolveTaskID(id, query)
 	if err != nil {
 		return Task{}, Artifact{}, err
 	}
@@ -173,13 +179,14 @@ func (s *Service) AddArtifact(id string, input AddArtifactInput) (Task, Artifact
 	return task, artifact, nil
 }
 
-func (s *Service) ResolveTaskID(id string) (string, error) {
+func (s *Service) ResolveTaskID(id string, query TaskQuery) (string, error) {
 	id = strings.TrimSpace(id)
 	if id != "" && id != "latest" {
 		return id, nil
 	}
 
-	tasks, err := s.Inbox(false)
+	query.IncludeDone = false
+	tasks, err := s.Inbox(query)
 	if err != nil {
 		return "", err
 	}
@@ -187,6 +194,39 @@ func (s *Service) ResolveTaskID(id string) (string, error) {
 		return "", ErrNoOpenTasks
 	}
 	return tasks[0].ID, nil
+}
+
+func filterTasks(tasks []Task, query TaskQuery) []Task {
+	if strings.TrimSpace(query.Repo) == "" {
+		return tasks
+	}
+
+	next := make([]Task, 0, len(tasks))
+	for _, task := range tasks {
+		if sameRepo(task.Repo, query.Repo) {
+			next = append(next, task)
+		}
+	}
+	return next
+}
+
+func sameRepo(left string, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	return cleanPath(left) == cleanPath(right)
+}
+
+func cleanPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
 }
 
 func SortByAttention(tasks []Task, includeDone bool) []Task {

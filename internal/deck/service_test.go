@@ -31,7 +31,7 @@ func TestServiceWorkflow(t *testing.T) {
 	updated, run, err := service.AddRun(task.ID, AddRunInput{
 		Agent:   "codex",
 		Summary: "checked diff",
-	})
+	}, TaskQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestServiceWorkflow(t *testing.T) {
 		t.Fatalf("status = %s, want %s", updated.Status, StatusNeedsReview)
 	}
 
-	tasks, err := service.Inbox(false)
+	tasks, err := service.Inbox(TaskQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestServiceWorkflow(t *testing.T) {
 		t.Fatalf("tasks = %#v", tasks)
 	}
 
-	done, err := service.MarkDone(task.ID, nil)
+	done, err := service.MarkDone(task.ID, nil, TaskQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestServiceWorkflow(t *testing.T) {
 		t.Fatal("completed_at should be set")
 	}
 
-	tasks, err = service.Inbox(false)
+	tasks, err = service.Inbox(TaskQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,17 +75,21 @@ func TestServiceResolvesLatestTask(t *testing.T) {
 		WithClock(func() time.Time { return now }),
 		WithIDGenerator(sequenceIDGenerator("tsk_1", "tsk_2")),
 	)
-	if _, err := service.CreateTask(NewTaskInput{Goal: "first"}); err != nil {
+	if _, err := service.CreateTask(NewTaskInput{Goal: "first", Repo: "/tmp/first"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CreateTask(NewTaskInput{Goal: "second"}); err != nil {
+	if _, err := service.CreateTask(NewTaskInput{Goal: "second", Repo: "/tmp/second"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateTask("tsk_1", UpdateTaskInput{Status: string(StatusNeedsReview)}); err != nil {
+	if _, err := service.UpdateTask(
+		"tsk_1",
+		UpdateTaskInput{Status: string(StatusNeedsReview)},
+		TaskQuery{},
+	); err != nil {
 		t.Fatal(err)
 	}
 
-	id, err := service.ResolveTaskID("latest")
+	id, err := service.ResolveTaskID("latest", TaskQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,12 +97,51 @@ func TestServiceResolvesLatestTask(t *testing.T) {
 		t.Fatalf("id = %s, want tsk_1", id)
 	}
 
-	task, err := service.GetTask("")
+	task, err := service.GetTask("", TaskQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if task.ID != "tsk_1" {
 		t.Fatalf("task id = %s, want tsk_1", task.ID)
+	}
+}
+
+func TestServiceResolvesLatestWithinRepo(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	repo := newMemoryRepository()
+	service := NewService(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(sequenceIDGenerator("tsk_1", "tsk_2")),
+	)
+	if _, err := service.CreateTask(NewTaskInput{Goal: "first", Repo: "/tmp/first"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateTask(NewTaskInput{Goal: "second", Repo: "/tmp/second"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateTask(
+		"tsk_1",
+		UpdateTaskInput{Status: string(StatusNeedsReview)},
+		TaskQuery{},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := service.GetTask("latest", TaskQuery{Repo: "/tmp/second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ID != "tsk_2" {
+		t.Fatalf("task id = %s, want tsk_2", task.ID)
+	}
+
+	filtered, err := service.Inbox(TaskQuery{Repo: "/tmp/second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != "tsk_2" {
+		t.Fatalf("filtered = %#v, want only tsk_2", filtered)
 	}
 }
 

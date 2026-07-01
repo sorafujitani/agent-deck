@@ -10,13 +10,13 @@ import (
 )
 
 type DeckService interface {
-	Inbox(includeDone bool) ([]deck.Task, error)
+	Inbox(query deck.TaskQuery) ([]deck.Task, error)
 	CreateTask(input deck.NewTaskInput) (deck.Task, error)
-	GetTask(id string) (deck.Task, error)
-	UpdateTask(id string, input deck.UpdateTaskInput) (deck.Task, error)
-	MarkDone(id string, nextAction *string) (deck.Task, error)
-	AddRun(id string, input deck.AddRunInput) (deck.Task, deck.RunRecord, error)
-	AddArtifact(id string, input deck.AddArtifactInput) (deck.Task, deck.Artifact, error)
+	GetTask(id string, query deck.TaskQuery) (deck.Task, error)
+	UpdateTask(id string, input deck.UpdateTaskInput, query deck.TaskQuery) (deck.Task, error)
+	MarkDone(id string, nextAction *string, query deck.TaskQuery) (deck.Task, error)
+	AddRun(id string, input deck.AddRunInput, query deck.TaskQuery) (deck.Task, deck.RunRecord, error)
+	AddArtifact(id string, input deck.AddArtifactInput, query deck.TaskQuery) (deck.Task, deck.Artifact, error)
 }
 
 type App struct {
@@ -68,12 +68,16 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 func (a *App) runInbox(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("inbox", stderr)
 	includeDone := fs.Bool("all", false, "include done tasks")
+	repo := fs.String("repo", "", "filter tasks by repository path")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
 	}
 
-	tasks, err := a.service.Inbox(*includeDone)
+	tasks, err := a.service.Inbox(deck.TaskQuery{
+		IncludeDone: *includeDone,
+		Repo:        *repo,
+	})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -119,6 +123,7 @@ func (a *App) runNew(args []string, stdout, stderr io.Writer) int {
 
 func (a *App) runShow(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("show", stderr)
+	repo := fs.String("repo", "", "resolve latest within repository path")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
@@ -128,7 +133,7 @@ func (a *App) runShow(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	task, err := a.service.GetTask(id)
+	task, err := a.service.GetTask(id, deck.TaskQuery{Repo: *repo})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -144,6 +149,7 @@ func (a *App) runUpdate(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("update", stderr)
 	status := fs.String("status", "", "status")
 	nextAction := fs.String("next", "", "next action")
+	repo := fs.String("repo", "", "resolve latest within repository path")
 	asJSON := fs.Bool("json", false, "print JSON")
 	var context repeatedFlag
 	fs.Var(&context, "context", "context line")
@@ -170,7 +176,7 @@ func (a *App) runUpdate(args []string, stdout, stderr io.Writer) int {
 		Status:     *status,
 		NextAction: next,
 		Context:    context,
-	})
+	}, deck.TaskQuery{Repo: *repo})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -185,6 +191,7 @@ func (a *App) runUpdate(args []string, stdout, stderr io.Writer) int {
 func (a *App) runDone(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("done", stderr)
 	nextAction := fs.String("next", "", "final note")
+	repo := fs.String("repo", "", "resolve latest within repository path")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
@@ -198,7 +205,7 @@ func (a *App) runDone(args []string, stdout, stderr io.Writer) int {
 	if *nextAction != "" {
 		next = nextAction
 	}
-	task, err := a.service.MarkDone(id, next)
+	task, err := a.service.MarkDone(id, next, deck.TaskQuery{Repo: *repo})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -214,6 +221,7 @@ func (a *App) runAddRun(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("run", stderr)
 	agent := fs.String("agent", "agent", "agent name")
 	summary := fs.String("summary", "", "run summary")
+	repo := fs.String("repo", "", "resolve latest within repository path")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
@@ -226,7 +234,7 @@ func (a *App) runAddRun(args []string, stdout, stderr io.Writer) int {
 	task, run, err := a.service.AddRun(id, deck.AddRunInput{
 		Agent:   *agent,
 		Summary: *summary,
-	})
+	}, deck.TaskQuery{Repo: *repo})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -242,6 +250,7 @@ func (a *App) runArtifact(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("artifact", stderr)
 	kind := fs.String("kind", "file", "artifact kind")
 	note := fs.String("note", "", "artifact note")
+	repo := fs.String("repo", "", "resolve latest within repository path")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
@@ -256,7 +265,7 @@ func (a *App) runArtifact(args []string, stdout, stderr io.Writer) int {
 		Kind: *kind,
 		Path: path,
 		Note: *note,
-	})
+	}, deck.TaskQuery{Repo: *repo})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

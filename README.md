@@ -62,6 +62,7 @@ List open tasks in attention order:
 ```sh
 deck inbox
 deck inbox --json
+deck inbox --repo /path/to/repo
 ```
 
 Show the full case file for a task. Without an ID, `show` resolves the top
@@ -70,6 +71,7 @@ attention item from `deck inbox`:
 ```sh
 deck show
 deck show latest --json
+deck show --repo /path/to/repo
 deck show tsk_1234abcd
 ```
 
@@ -77,6 +79,7 @@ Track an agent run:
 
 ```sh
 deck run latest --agent codex --summary "Reviewed diff and found no blockers"
+deck run --repo /path/to/repo --agent codex --summary "Reviewed diff and found no blockers"
 deck run tsk_1234abcd --agent codex --summary "Reviewed diff and found no blockers"
 ```
 
@@ -84,6 +87,7 @@ Attach an artifact:
 
 ```sh
 deck artifact ./review.md --kind report --note "review output"
+deck artifact --repo /path/to/repo ./review.md --kind report --note "review output"
 deck artifact tsk_1234abcd ./review.md --kind report --note "review output"
 ```
 
@@ -91,6 +95,7 @@ Update status or next action:
 
 ```sh
 deck update --status blocked --next "waiting for CI logs"
+deck update --repo /path/to/repo --status blocked --next "waiting for CI logs"
 deck update tsk_1234abcd --status blocked --next "waiting for CI logs"
 ```
 
@@ -98,6 +103,7 @@ Mark a task done:
 
 ```sh
 deck done
+deck done --repo /path/to/repo
 deck done tsk_1234abcd
 ```
 

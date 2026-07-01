@@ -69,13 +69,13 @@ func PrintHelp(w io.Writer) {
 deck is a task-first CLI for tracking agent work.
 
 Usage:
-  deck inbox [--all] [--json]
+  deck inbox [--all] [--repo PATH] [--json]
   deck new <goal> [--repo PATH] [--issue URL] [--pr URL] [--context TEXT] [--next TEXT] [--json]
-  deck show [<task-id>|latest] [--json]
-  deck update [<task-id>|latest] [--status STATUS] [--context TEXT] [--next TEXT] [--json]
-  deck run [<task-id>|latest] [--agent NAME] [--summary TEXT] [--json]
-  deck artifact [<task-id>|latest] <path> [--kind KIND] [--note TEXT] [--json]
-  deck done [<task-id>|latest] [--next TEXT] [--json]
+  deck show [<task-id>|latest] [--repo PATH] [--json]
+  deck update [<task-id>|latest] [--status STATUS] [--repo PATH] [--context TEXT] [--next TEXT] [--json]
+  deck run [<task-id>|latest] [--agent NAME] [--repo PATH] [--summary TEXT] [--json]
+  deck artifact [<task-id>|latest] <path> [--kind KIND] [--repo PATH] [--note TEXT] [--json]
+  deck done [<task-id>|latest] [--repo PATH] [--next TEXT] [--json]
   deck path
 
 Statuses:

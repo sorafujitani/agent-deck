@@ -1,0 +1,125 @@
+package deck
+
+import (
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+	"time"
+)
+
+func PrintInbox(w io.Writer, tasks []Task, includeDone bool) {
+	tasks = append([]Task(nil), tasks...)
+	sort.SliceStable(tasks, func(i, j int) bool {
+		left := attentionRank(tasks[i].Status)
+		right := attentionRank(tasks[j].Status)
+		if left != right {
+			return left < right
+		}
+		return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
+	})
+
+	count := 0
+	for _, task := range tasks {
+		if !includeDone && task.Status == StatusDone {
+			continue
+		}
+		count++
+		fmt.Fprintf(w, "%s  %-12s  %s\n", task.ID, task.Status, task.Goal)
+		if task.NextAction != "" {
+			fmt.Fprintf(w, "  next: %s\n", task.NextAction)
+		}
+	}
+	if count == 0 {
+		fmt.Fprintln(w, "No tasks.")
+	}
+}
+
+func PrintTask(w io.Writer, task Task) {
+	fmt.Fprintf(w, "%s  %s\n", task.ID, task.Goal)
+	fmt.Fprintf(w, "status: %s\n", task.Status)
+	printIfSet(w, "repo", task.Repo)
+	printIfSet(w, "issue", task.Issue)
+	printIfSet(w, "pr", task.PR)
+	printIfSet(w, "next", task.NextAction)
+	fmt.Fprintf(w, "created: %s\n", formatTime(task.CreatedAt))
+	fmt.Fprintf(w, "updated: %s\n", formatTime(task.UpdatedAt))
+	if task.CompletedAt != nil {
+		fmt.Fprintf(w, "completed: %s\n", formatTime(*task.CompletedAt))
+	}
+
+	if len(task.Context) > 0 {
+		fmt.Fprintln(w, "\ncontext:")
+		for _, item := range task.Context {
+			fmt.Fprintf(w, "- %s\n", item)
+		}
+	}
+	if len(task.Runs) > 0 {
+		fmt.Fprintln(w, "\nruns:")
+		for _, run := range task.Runs {
+			fmt.Fprintf(w, "- %s  %s  %s\n", run.ID, run.Agent, formatTime(run.EndedAt))
+			if run.Summary != "" {
+				fmt.Fprintf(w, "  %s\n", run.Summary)
+			}
+		}
+	}
+	if len(task.Artifacts) > 0 {
+		fmt.Fprintln(w, "\nartifacts:")
+		for _, artifact := range task.Artifacts {
+			line := fmt.Sprintf("- %s  %s", artifact.Kind, artifact.Path)
+			if artifact.Note != "" {
+				line += "  " + artifact.Note
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+}
+
+func PrintHelp(w io.Writer) {
+	fmt.Fprint(w, strings.TrimSpace(`
+deck is a task-first CLI for tracking agent work.
+
+Usage:
+  deck inbox [--all]
+  deck new <goal> [--repo PATH] [--issue URL] [--pr URL] [--context TEXT] [--next TEXT]
+  deck show <task-id>
+  deck update <task-id> [--status STATUS] [--context TEXT] [--next TEXT]
+  deck run <task-id> [--agent NAME] [--summary TEXT]
+  deck artifact <task-id> <path> [--kind KIND] [--note TEXT]
+  deck done <task-id> [--next TEXT]
+  deck path
+
+Statuses:
+  inbox, ready, running, needs-review, blocked, failed, done
+`)+"\n")
+}
+
+func attentionRank(status Status) int {
+	switch status {
+	case StatusNeedsReview:
+		return 0
+	case StatusBlocked, StatusFailed:
+		return 1
+	case StatusRunning:
+		return 2
+	case StatusInbox, StatusReady:
+		return 3
+	case StatusDone:
+		return 4
+	default:
+		return 5
+	}
+}
+
+func printIfSet(w io.Writer, label, value string) {
+	if value != "" {
+		fmt.Fprintf(w, "%s: %s\n", label, value)
+	}
+}
+
+func formatTime(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.Local().Format("2006-01-02 15:04:05")
+}

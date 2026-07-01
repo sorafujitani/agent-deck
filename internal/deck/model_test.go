@@ -1,6 +1,7 @@
 package deck
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -9,7 +10,7 @@ func TestDeckLifecycle(t *testing.T) {
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	deck := NewDeck()
 
-	task, err := deck.AddTask(NewTaskInput{
+	task, err := deck.AddTask("tsk_1", NewTaskInput{
 		Goal:       "review PR",
 		Repo:       "/tmp/repo",
 		Context:    []string{"  issue #1  ", ""},
@@ -33,7 +34,12 @@ func TestDeckLifecycle(t *testing.T) {
 		t.Fatalf("status = %s, want %s", updated.Status, StatusRunning)
 	}
 
-	updated, run, err := deck.AddRun(task.ID, AddRunInput{Agent: "codex", Summary: "looked at diff"}, now.Add(2*time.Minute))
+	updated, run, err := deck.AddRun(
+		task.ID,
+		"run_1",
+		AddRunInput{Agent: "codex", Summary: "looked at diff"},
+		now.Add(2*time.Minute),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +50,11 @@ func TestDeckLifecycle(t *testing.T) {
 		t.Fatalf("status = %s, want %s", updated.Status, StatusNeedsReview)
 	}
 
-	updated, artifact, err := deck.AddArtifact(task.ID, AddArtifactInput{Kind: "diff", Path: "diff.patch"}, now.Add(3*time.Minute))
+	updated, artifact, err := deck.AddArtifact(
+		task.ID,
+		AddArtifactInput{Kind: "diff", Path: "diff.patch"},
+		now.Add(3*time.Minute),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,13 +73,22 @@ func TestDeckLifecycle(t *testing.T) {
 
 func TestUpdateRejectsInvalidStatus(t *testing.T) {
 	deck := NewDeck()
-	task, err := deck.AddTask(NewTaskInput{Goal: "ship"}, time.Now())
+	task, err := deck.AddTask("tsk_1", NewTaskInput{Goal: "ship"}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	_, err = deck.UpdateTask(task.ID, UpdateTaskInput{Status: "waiting"}, time.Now())
-	if err == nil {
-		t.Fatal("expected invalid status error")
+	if !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("err = %v, want ErrInvalidStatus", err)
+	}
+}
+
+func TestAddTaskRequiresGoal(t *testing.T) {
+	deck := NewDeck()
+
+	_, err := deck.AddTask("tsk_1", NewTaskInput{Goal: "  "}, time.Now())
+	if !errors.Is(err, ErrGoalRequired) {
+		t.Fatalf("err = %v, want ErrGoalRequired", err)
 	}
 }

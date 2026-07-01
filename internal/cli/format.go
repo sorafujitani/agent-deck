@@ -1,41 +1,29 @@
-package deck
+package cli
 
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/sorafujitani/agent-deck/internal/deck"
 )
 
-func PrintInbox(w io.Writer, tasks []Task, includeDone bool) {
-	tasks = append([]Task(nil), tasks...)
-	sort.SliceStable(tasks, func(i, j int) bool {
-		left := attentionRank(tasks[i].Status)
-		right := attentionRank(tasks[j].Status)
-		if left != right {
-			return left < right
-		}
-		return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
-	})
+func PrintInbox(w io.Writer, tasks []deck.Task) {
+	if len(tasks) == 0 {
+		fmt.Fprintln(w, "No tasks.")
+		return
+	}
 
-	count := 0
 	for _, task := range tasks {
-		if !includeDone && task.Status == StatusDone {
-			continue
-		}
-		count++
 		fmt.Fprintf(w, "%s  %-12s  %s\n", task.ID, task.Status, task.Goal)
 		if task.NextAction != "" {
 			fmt.Fprintf(w, "  next: %s\n", task.NextAction)
 		}
 	}
-	if count == 0 {
-		fmt.Fprintln(w, "No tasks.")
-	}
 }
 
-func PrintTask(w io.Writer, task Task) {
+func PrintTask(w io.Writer, task deck.Task) {
 	fmt.Fprintf(w, "%s  %s\n", task.ID, task.Goal)
 	fmt.Fprintf(w, "status: %s\n", task.Status)
 	printIfSet(w, "repo", task.Repo)
@@ -92,23 +80,6 @@ Usage:
 Statuses:
   inbox, ready, running, needs-review, blocked, failed, done
 `)+"\n")
-}
-
-func attentionRank(status Status) int {
-	switch status {
-	case StatusNeedsReview:
-		return 0
-	case StatusBlocked, StatusFailed:
-		return 1
-	case StatusRunning:
-		return 2
-	case StatusInbox, StatusReady:
-		return 3
-	case StatusDone:
-		return 4
-	default:
-		return 5
-	}
 }
 
 func printIfSet(w io.Writer, label, value string) {

@@ -19,6 +19,18 @@ go test ./...
 go run ./cmd/deck help
 ```
 
+## Architecture
+
+The CLI is wired with manual constructor injection:
+
+- `cmd/deck` is the composition root.
+- `internal/cli` parses arguments and handles stdout/stderr.
+- `internal/deck` owns the task model, lifecycle rules, and application service.
+- `internal/storage` persists the deck state as JSON.
+
+This keeps the domain logic testable without touching the filesystem, while the
+CLI and storage adapters remain small and replaceable.
+
 ## Store
 
 By default, `deck` stores data under the OS user config directory:

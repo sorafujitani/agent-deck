@@ -1,23 +1,37 @@
-package deck
+package cli
 
 import (
 	"flag"
 	"fmt"
 	"io"
 	"strings"
-	"time"
+
+	"github.com/sorafujitani/agent-deck/internal/deck"
 )
 
-func Main(args []string, stdout, stderr io.Writer) int {
-	store, err := DefaultStore()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	return Run(args, stdout, stderr, store, time.Now)
+type DeckService interface {
+	Inbox(includeDone bool) ([]deck.Task, error)
+	CreateTask(input deck.NewTaskInput) (deck.Task, error)
+	GetTask(id string) (deck.Task, error)
+	UpdateTask(id string, input deck.UpdateTaskInput) (deck.Task, error)
+	MarkDone(id string, nextAction *string) (deck.Task, error)
+	AddRun(id string, input deck.AddRunInput) (deck.Task, deck.RunRecord, error)
+	AddArtifact(id string, input deck.AddArtifactInput) (deck.Task, deck.Artifact, error)
 }
 
-func Run(args []string, stdout, stderr io.Writer, store Store, now func() time.Time) int {
+type App struct {
+	service   DeckService
+	storePath string
+}
+
+func NewApp(service DeckService, storePath string) *App {
+	return &App{
+		service:   service,
+		storePath: storePath,
+	}
+}
+
+func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		PrintHelp(stdout)
 		return 0
@@ -28,22 +42,22 @@ func Run(args []string, stdout, stderr io.Writer, store Store, now func() time.T
 		PrintHelp(stdout)
 		return 0
 	case "path":
-		fmt.Fprintln(stdout, store.Path())
+		fmt.Fprintln(stdout, a.storePath)
 		return 0
 	case "inbox":
-		return runInbox(args[1:], stdout, stderr, store)
+		return a.runInbox(args[1:], stdout, stderr)
 	case "new":
-		return runNew(args[1:], stdout, stderr, store, now)
+		return a.runNew(args[1:], stdout, stderr)
 	case "show":
-		return runShow(args[1:], stdout, stderr, store)
+		return a.runShow(args[1:], stdout, stderr)
 	case "update":
-		return runUpdate(args[1:], stdout, stderr, store, now)
+		return a.runUpdate(args[1:], stdout, stderr)
 	case "done":
-		return runDone(args[1:], stdout, stderr, store, now)
+		return a.runDone(args[1:], stdout, stderr)
 	case "run":
-		return runAddRun(args[1:], stdout, stderr, store, now)
+		return a.runAddRun(args[1:], stdout, stderr)
 	case "artifact":
-		return runArtifact(args[1:], stdout, stderr, store, now)
+		return a.runArtifact(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		PrintHelp(stderr)
@@ -51,23 +65,23 @@ func Run(args []string, stdout, stderr io.Writer, store Store, now func() time.T
 	}
 }
 
-func runInbox(args []string, stdout, stderr io.Writer, store Store) int {
+func (a *App) runInbox(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("inbox", stderr)
 	includeDone := fs.Bool("all", false, "include done tasks")
 	if !parseFlags(fs, args) {
 		return 2
 	}
 
-	deck, err := store.Load()
+	tasks, err := a.service.Inbox(*includeDone)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	PrintInbox(stdout, deck.Tasks, *includeDone)
+	PrintInbox(stdout, tasks)
 	return 0
 }
 
-func runNew(args []string, stdout, stderr io.Writer, store Store, now func() time.Time) int {
+func (a *App) runNew(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("new", stderr)
 	repo := fs.String("repo", "", "repository path")
 	issue := fs.String("issue", "", "issue URL")
@@ -78,26 +92,16 @@ func runNew(args []string, stdout, stderr io.Writer, store Store, now func() tim
 	if !parseFlags(fs, args) {
 		return 2
 	}
-	goal := strings.Join(fs.Args(), " ")
 
-	deck, err := store.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	task, err := deck.AddTask(NewTaskInput{
-		Goal:       goal,
+	task, err := a.service.CreateTask(deck.NewTaskInput{
+		Goal:       strings.Join(fs.Args(), " "),
 		Repo:       *repo,
 		Issue:      *issue,
 		PR:         *pr,
 		Context:    context,
 		NextAction: *nextAction,
-	}, now())
+	})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := store.Save(deck); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -105,7 +109,7 @@ func runNew(args []string, stdout, stderr io.Writer, store Store, now func() tim
 	return 0
 }
 
-func runShow(args []string, stdout, stderr io.Writer, store Store) int {
+func (a *App) runShow(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("show", stderr)
 	if !parseFlags(fs, args) {
 		return 2
@@ -115,21 +119,16 @@ func runShow(args []string, stdout, stderr io.Writer, store Store) int {
 		return 2
 	}
 
-	deck, err := store.Load()
+	task, err := a.service.GetTask(id)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	task, ok := deck.FindTask(id)
-	if !ok {
-		fmt.Fprintf(stderr, "task not found: %s\n", id)
 		return 1
 	}
 	PrintTask(stdout, task)
 	return 0
 }
 
-func runUpdate(args []string, stdout, stderr io.Writer, store Store, now func() time.Time) int {
+func (a *App) runUpdate(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("update", stderr)
 	status := fs.String("status", "", "status")
 	nextAction := fs.String("next", "", "next action")
@@ -144,31 +143,22 @@ func runUpdate(args []string, stdout, stderr io.Writer, store Store, now func() 
 	}
 
 	if *status != "" {
-		if _, err := ParseStatus(*status); err != nil {
+		if _, err := deck.ParseStatus(*status); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
 	}
 
-	deck, err := store.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
 	var next *string
 	if *nextAction != "" {
 		next = nextAction
 	}
-	task, err := deck.UpdateTask(id, UpdateTaskInput{
+	task, err := a.service.UpdateTask(id, deck.UpdateTaskInput{
 		Status:     *status,
 		NextAction: next,
 		Context:    context,
-	}, now())
+	})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := store.Save(deck); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -176,7 +166,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, store Store, now func() 
 	return 0
 }
 
-func runDone(args []string, stdout, stderr io.Writer, store Store, now func() time.Time) int {
+func (a *App) runDone(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("done", stderr)
 	nextAction := fs.String("next", "", "final note")
 	if !parseFlags(fs, args) {
@@ -187,24 +177,12 @@ func runDone(args []string, stdout, stderr io.Writer, store Store, now func() ti
 		return 2
 	}
 
-	deck, err := store.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
 	var next *string
 	if *nextAction != "" {
 		next = nextAction
 	}
-	task, err := deck.UpdateTask(id, UpdateTaskInput{
-		Status:     string(StatusDone),
-		NextAction: next,
-	}, now())
+	task, err := a.service.MarkDone(id, next)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := store.Save(deck); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -212,7 +190,7 @@ func runDone(args []string, stdout, stderr io.Writer, store Store, now func() ti
 	return 0
 }
 
-func runAddRun(args []string, stdout, stderr io.Writer, store Store, now func() time.Time) int {
+func (a *App) runAddRun(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("run", stderr)
 	agent := fs.String("agent", "agent", "agent name")
 	summary := fs.String("summary", "", "run summary")
@@ -224,20 +202,11 @@ func runAddRun(args []string, stdout, stderr io.Writer, store Store, now func() 
 		return 2
 	}
 
-	deck, err := store.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	task, run, err := deck.AddRun(id, AddRunInput{
+	task, run, err := a.service.AddRun(id, deck.AddRunInput{
 		Agent:   *agent,
 		Summary: *summary,
-	}, now())
+	})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := store.Save(deck); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -245,7 +214,7 @@ func runAddRun(args []string, stdout, stderr io.Writer, store Store, now func() 
 	return 0
 }
 
-func runArtifact(args []string, stdout, stderr io.Writer, store Store, now func() time.Time) int {
+func (a *App) runArtifact(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("artifact", stderr)
 	kind := fs.String("kind", "file", "artifact kind")
 	note := fs.String("note", "", "artifact note")
@@ -258,21 +227,12 @@ func runArtifact(args []string, stdout, stderr io.Writer, store Store, now func(
 		return 2
 	}
 
-	deck, err := store.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	task, artifact, err := deck.AddArtifact(rest[0], AddArtifactInput{
+	task, artifact, err := a.service.AddArtifact(rest[0], deck.AddArtifactInput{
 		Kind: *kind,
 		Path: rest[1],
 		Note: *note,
-	}, now())
+	})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := store.Save(deck); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

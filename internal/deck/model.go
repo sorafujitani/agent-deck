@@ -1,12 +1,17 @@
 package deck
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+)
+
+var (
+	ErrArtifactPathRequired = errors.New("artifact path is required")
+	ErrGoalRequired         = errors.New("goal is required")
+	ErrInvalidStatus        = errors.New("invalid status")
+	ErrTaskNotFound         = errors.New("task not found")
 )
 
 type Status string
@@ -97,14 +102,14 @@ func NewDeck() Deck {
 	return Deck{Version: 1, Tasks: []Task{}}
 }
 
-func (d *Deck) AddTask(input NewTaskInput, now time.Time) (Task, error) {
+func (d *Deck) AddTask(id string, input NewTaskInput, now time.Time) (Task, error) {
 	goal := strings.TrimSpace(input.Goal)
 	if goal == "" {
-		return Task{}, errors.New("goal is required")
+		return Task{}, ErrGoalRequired
 	}
 
 	task := Task{
-		ID:         newID("tsk"),
+		ID:         strings.TrimSpace(id),
 		Goal:       goal,
 		Status:     StatusInbox,
 		Repo:       strings.TrimSpace(input.Repo),
@@ -122,13 +127,13 @@ func (d *Deck) AddTask(input NewTaskInput, now time.Time) (Task, error) {
 func (d *Deck) UpdateTask(id string, input UpdateTaskInput, now time.Time) (Task, error) {
 	task, ok := d.FindTask(id)
 	if !ok {
-		return Task{}, fmt.Errorf("task not found: %s", id)
+		return Task{}, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 
 	if input.Status != "" {
-		status := Status(strings.TrimSpace(input.Status))
-		if _, ok := validStatuses[status]; !ok {
-			return Task{}, fmt.Errorf("invalid status: %s", input.Status)
+		status, err := ParseStatus(input.Status)
+		if err != nil {
+			return Task{}, err
 		}
 		task.Status = status
 		if status == StatusDone {
@@ -147,10 +152,10 @@ func (d *Deck) UpdateTask(id string, input UpdateTaskInput, now time.Time) (Task
 	return task, nil
 }
 
-func (d *Deck) AddRun(id string, input AddRunInput, now time.Time) (Task, RunRecord, error) {
+func (d *Deck) AddRun(id string, runID string, input AddRunInput, now time.Time) (Task, RunRecord, error) {
 	task, ok := d.FindTask(id)
 	if !ok {
-		return Task{}, RunRecord{}, fmt.Errorf("task not found: %s", id)
+		return Task{}, RunRecord{}, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	agent := strings.TrimSpace(input.Agent)
 	if agent == "" {
@@ -158,7 +163,7 @@ func (d *Deck) AddRun(id string, input AddRunInput, now time.Time) (Task, RunRec
 	}
 
 	run := RunRecord{
-		ID:        newID("run"),
+		ID:        strings.TrimSpace(runID),
 		Agent:     agent,
 		Summary:   strings.TrimSpace(input.Summary),
 		StartedAt: now,
@@ -174,11 +179,11 @@ func (d *Deck) AddRun(id string, input AddRunInput, now time.Time) (Task, RunRec
 func (d *Deck) AddArtifact(id string, input AddArtifactInput, now time.Time) (Task, Artifact, error) {
 	task, ok := d.FindTask(id)
 	if !ok {
-		return Task{}, Artifact{}, fmt.Errorf("task not found: %s", id)
+		return Task{}, Artifact{}, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	path := strings.TrimSpace(input.Path)
 	if path == "" {
-		return Task{}, Artifact{}, errors.New("artifact path is required")
+		return Task{}, Artifact{}, ErrArtifactPathRequired
 	}
 	kind := strings.TrimSpace(input.Kind)
 	if kind == "" {
@@ -219,7 +224,7 @@ func (d *Deck) replaceTask(next Task) {
 func ParseStatus(value string) (Status, error) {
 	status := Status(strings.TrimSpace(value))
 	if _, ok := validStatuses[status]; !ok {
-		return "", fmt.Errorf("invalid status: %s", value)
+		return "", fmt.Errorf("%w: %s", ErrInvalidStatus, value)
 	}
 	return status, nil
 }
@@ -233,12 +238,4 @@ func compactStrings(values []string) []string {
 		}
 	}
 	return next
-}
-
-func newID(prefix string) string {
-	var bytes [4]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
-	}
-	return prefix + "_" + hex.EncodeToString(bytes[:])
 }

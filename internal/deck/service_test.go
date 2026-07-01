@@ -67,6 +67,41 @@ func TestServiceWorkflow(t *testing.T) {
 	}
 }
 
+func TestServiceResolvesLatestTask(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	repo := newMemoryRepository()
+	service := NewService(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(sequenceIDGenerator("tsk_1", "tsk_2")),
+	)
+	if _, err := service.CreateTask(NewTaskInput{Goal: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateTask(NewTaskInput{Goal: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateTask("tsk_1", UpdateTaskInput{Status: string(StatusNeedsReview)}); err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := service.ResolveTaskID("latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "tsk_1" {
+		t.Fatalf("id = %s, want tsk_1", id)
+	}
+
+	task, err := service.GetTask("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ID != "tsk_1" {
+		t.Fatalf("task id = %s, want tsk_1", task.ID)
+	}
+}
+
 func TestSortByAttention(t *testing.T) {
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	tasks := []Task{

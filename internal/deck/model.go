@@ -11,6 +11,7 @@ var (
 	ErrArtifactPathRequired = errors.New("artifact path is required")
 	ErrGoalRequired         = errors.New("goal is required")
 	ErrInvalidStatus        = errors.New("invalid status")
+	ErrNoOpenTasks          = errors.New("no open tasks")
 	ErrTaskNotFound         = errors.New("task not found")
 )
 

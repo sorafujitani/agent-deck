@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -86,6 +87,11 @@ func (s *Service) CreateTask(input NewTaskInput) (Task, error) {
 }
 
 func (s *Service) GetTask(id string) (Task, error) {
+	id, err := s.ResolveTaskID(id)
+	if err != nil {
+		return Task{}, err
+	}
+
 	state, err := s.repo.Load()
 	if err != nil {
 		return Task{}, fmt.Errorf("load deck: %w", err)
@@ -98,6 +104,11 @@ func (s *Service) GetTask(id string) (Task, error) {
 }
 
 func (s *Service) UpdateTask(id string, input UpdateTaskInput) (Task, error) {
+	id, err := s.ResolveTaskID(id)
+	if err != nil {
+		return Task{}, err
+	}
+
 	state, err := s.repo.Load()
 	if err != nil {
 		return Task{}, fmt.Errorf("load deck: %w", err)
@@ -121,6 +132,11 @@ func (s *Service) MarkDone(id string, nextAction *string) (Task, error) {
 }
 
 func (s *Service) AddRun(id string, input AddRunInput) (Task, RunRecord, error) {
+	id, err := s.ResolveTaskID(id)
+	if err != nil {
+		return Task{}, RunRecord{}, err
+	}
+
 	state, err := s.repo.Load()
 	if err != nil {
 		return Task{}, RunRecord{}, fmt.Errorf("load deck: %w", err)
@@ -137,6 +153,11 @@ func (s *Service) AddRun(id string, input AddRunInput) (Task, RunRecord, error) 
 }
 
 func (s *Service) AddArtifact(id string, input AddArtifactInput) (Task, Artifact, error) {
+	id, err := s.ResolveTaskID(id)
+	if err != nil {
+		return Task{}, Artifact{}, err
+	}
+
 	state, err := s.repo.Load()
 	if err != nil {
 		return Task{}, Artifact{}, fmt.Errorf("load deck: %w", err)
@@ -150,6 +171,22 @@ func (s *Service) AddArtifact(id string, input AddArtifactInput) (Task, Artifact
 		return Task{}, Artifact{}, fmt.Errorf("save deck: %w", err)
 	}
 	return task, artifact, nil
+}
+
+func (s *Service) ResolveTaskID(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if id != "" && id != "latest" {
+		return id, nil
+	}
+
+	tasks, err := s.Inbox(false)
+	if err != nil {
+		return "", err
+	}
+	if len(tasks) == 0 {
+		return "", ErrNoOpenTasks
+	}
+	return tasks[0].ID, nil
 }
 
 func SortByAttention(tasks []Task, includeDone bool) []Task {

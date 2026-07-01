@@ -68,6 +68,7 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 func (a *App) runInbox(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("inbox", stderr)
 	includeDone := fs.Bool("all", false, "include done tasks")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
 	}
@@ -76,6 +77,9 @@ func (a *App) runInbox(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	if *asJSON {
+		return printJSON(stdout, stderr, tasks)
 	}
 	PrintInbox(stdout, tasks)
 	return 0
@@ -87,6 +91,7 @@ func (a *App) runNew(args []string, stdout, stderr io.Writer) int {
 	issue := fs.String("issue", "", "issue URL")
 	pr := fs.String("pr", "", "pull request URL")
 	nextAction := fs.String("next", "", "next action")
+	asJSON := fs.Bool("json", false, "print JSON")
 	var context repeatedFlag
 	fs.Var(&context, "context", "context line")
 	if !parseFlags(fs, args) {
@@ -105,16 +110,20 @@ func (a *App) runNew(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if *asJSON {
+		return printJSON(stdout, stderr, task)
+	}
 	fmt.Fprintf(stdout, "created %s\n", task.ID)
 	return 0
 }
 
 func (a *App) runShow(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("show", stderr)
+	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
 	}
-	id, ok := singleID(fs.Args(), stderr)
+	id, ok := optionalID(fs.Args(), stderr)
 	if !ok {
 		return 2
 	}
@@ -124,6 +133,9 @@ func (a *App) runShow(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if *asJSON {
+		return printJSON(stdout, stderr, task)
+	}
 	PrintTask(stdout, task)
 	return 0
 }
@@ -132,12 +144,13 @@ func (a *App) runUpdate(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("update", stderr)
 	status := fs.String("status", "", "status")
 	nextAction := fs.String("next", "", "next action")
+	asJSON := fs.Bool("json", false, "print JSON")
 	var context repeatedFlag
 	fs.Var(&context, "context", "context line")
 	if !parseFlags(fs, args) {
 		return 2
 	}
-	id, ok := singleID(fs.Args(), stderr)
+	id, ok := optionalID(fs.Args(), stderr)
 	if !ok {
 		return 2
 	}
@@ -162,6 +175,9 @@ func (a *App) runUpdate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if *asJSON {
+		return printJSON(stdout, stderr, task)
+	}
 	fmt.Fprintf(stdout, "updated %s  %s\n", task.ID, task.Status)
 	return 0
 }
@@ -169,10 +185,11 @@ func (a *App) runUpdate(args []string, stdout, stderr io.Writer) int {
 func (a *App) runDone(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("done", stderr)
 	nextAction := fs.String("next", "", "final note")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
 	}
-	id, ok := singleID(fs.Args(), stderr)
+	id, ok := optionalID(fs.Args(), stderr)
 	if !ok {
 		return 2
 	}
@@ -186,6 +203,9 @@ func (a *App) runDone(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if *asJSON {
+		return printJSON(stdout, stderr, task)
+	}
 	fmt.Fprintf(stdout, "done %s\n", task.ID)
 	return 0
 }
@@ -194,10 +214,11 @@ func (a *App) runAddRun(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("run", stderr)
 	agent := fs.String("agent", "agent", "agent name")
 	summary := fs.String("summary", "", "run summary")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
 	}
-	id, ok := singleID(fs.Args(), stderr)
+	id, ok := optionalID(fs.Args(), stderr)
 	if !ok {
 		return 2
 	}
@@ -210,6 +231,9 @@ func (a *App) runAddRun(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if *asJSON {
+		return printJSON(stdout, stderr, addRunResult{Task: task, Run: run})
+	}
 	fmt.Fprintf(stdout, "added %s to %s  %s\n", run.ID, task.ID, task.Status)
 	return 0
 }
@@ -218,26 +242,40 @@ func (a *App) runArtifact(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("artifact", stderr)
 	kind := fs.String("kind", "file", "artifact kind")
 	note := fs.String("note", "", "artifact note")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if !parseFlags(fs, args) {
 		return 2
 	}
 	rest := fs.Args()
-	if len(rest) != 2 {
-		fmt.Fprintln(stderr, "usage: deck artifact <task-id> <path>")
+	id, path, ok := artifactArgs(rest, stderr)
+	if !ok {
 		return 2
 	}
 
-	task, artifact, err := a.service.AddArtifact(rest[0], deck.AddArtifactInput{
+	task, artifact, err := a.service.AddArtifact(id, deck.AddArtifactInput{
 		Kind: *kind,
-		Path: rest[1],
+		Path: path,
 		Note: *note,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if *asJSON {
+		return printJSON(stdout, stderr, addArtifactResult{Task: task, Artifact: artifact})
+	}
 	fmt.Fprintf(stdout, "added %s artifact to %s\n", artifact.Kind, task.ID)
 	return 0
+}
+
+type addRunResult struct {
+	Task deck.Task      `json:"task"`
+	Run  deck.RunRecord `json:"run"`
+}
+
+type addArtifactResult struct {
+	Task     deck.Task     `json:"task"`
+	Artifact deck.Artifact `json:"artifact"`
 }
 
 type repeatedFlag []string
@@ -261,12 +299,27 @@ func parseFlags(fs *flag.FlagSet, args []string) bool {
 	return fs.Parse(reorderFlagArgs(fs, args)) == nil
 }
 
-func singleID(args []string, stderr io.Writer) (string, bool) {
-	if len(args) != 1 {
-		fmt.Fprintln(stderr, "expected exactly one task id")
+func optionalID(args []string, stderr io.Writer) (string, bool) {
+	if len(args) > 1 {
+		fmt.Fprintln(stderr, "expected zero or one task id")
 		return "", false
 	}
+	if len(args) == 0 {
+		return "latest", true
+	}
 	return args[0], true
+}
+
+func artifactArgs(args []string, stderr io.Writer) (string, string, bool) {
+	switch len(args) {
+	case 1:
+		return "latest", args[0], true
+	case 2:
+		return args[0], args[1], true
+	default:
+		fmt.Fprintln(stderr, "usage: deck artifact [<task-id>|latest] <path>")
+		return "", "", false
+	}
 }
 
 func reorderFlagArgs(fs *flag.FlagSet, args []string) []string {

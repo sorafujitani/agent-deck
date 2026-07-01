@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -68,13 +69,13 @@ func PrintHelp(w io.Writer) {
 deck is a task-first CLI for tracking agent work.
 
 Usage:
-  deck inbox [--all]
-  deck new <goal> [--repo PATH] [--issue URL] [--pr URL] [--context TEXT] [--next TEXT]
-  deck show <task-id>
-  deck update <task-id> [--status STATUS] [--context TEXT] [--next TEXT]
-  deck run <task-id> [--agent NAME] [--summary TEXT]
-  deck artifact <task-id> <path> [--kind KIND] [--note TEXT]
-  deck done <task-id> [--next TEXT]
+  deck inbox [--all] [--json]
+  deck new <goal> [--repo PATH] [--issue URL] [--pr URL] [--context TEXT] [--next TEXT] [--json]
+  deck show [<task-id>|latest] [--json]
+  deck update [<task-id>|latest] [--status STATUS] [--context TEXT] [--next TEXT] [--json]
+  deck run [<task-id>|latest] [--agent NAME] [--summary TEXT] [--json]
+  deck artifact [<task-id>|latest] <path> [--kind KIND] [--note TEXT] [--json]
+  deck done [<task-id>|latest] [--next TEXT] [--json]
   deck path
 
 Statuses:
@@ -93,4 +94,14 @@ func formatTime(value time.Time) string {
 		return "-"
 	}
 	return value.Local().Format("2006-01-02 15:04:05")
+}
+
+func printJSON(stdout, stderr io.Writer, value any) int {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		fmt.Fprintf(stderr, "encode JSON: %v\n", err)
+		return 1
+	}
+	return 0
 }
